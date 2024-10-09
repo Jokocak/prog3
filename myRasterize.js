@@ -15,6 +15,9 @@ const INPUT_ELLIPSOIDS_URL =
   "https://ncsucgclass.github.io/prog3/ellipsoids.json";
 //const INPUT_SPHERES_URL = "https://ncsucgclass.github.io/prog3/spheres.json"; // spheres file loc
 var Eye = new vec4.fromValues(0.5, 0.5, -0.5, 1.0); // default eye position in world space
+var Center = new vec4.fromValues(0.5, 0.5, 0.0, 1.0);
+var UpVector = new vec4.fromValues(0.0, 1.0, 0.0, 1.0);
+var LookVector = new vec4.fromValues(0.0, 0.0, 1.0, 1.0);
 
 /* webgl globals */
 var gl = null; // the all powerful gl object. It's all here folks!
@@ -24,6 +27,11 @@ var triBufferSize; // the number of indices in the triangle buffer
 var altPosition; // flag indicating whether to alter vertex positions
 var vertexPositionAttrib; // where to put position for vertex shader
 var altPositionUniform; // where to put altPosition flag for vertex shader
+
+/* My variables */
+var canvas;
+var worldMatrix;
+var matWorldUniformLocation;
 
 // ASSIGNMENT HELPER FUNCTIONS
 
@@ -58,7 +66,7 @@ function getJSONFile(url, descr) {
 // set up the webGL environment
 function setupWebGL() {
   // Get the canvas and context
-  var canvas = document.getElementById("myWebGLCanvas"); // create a js canvas
+  canvas = document.getElementById("myWebGLCanvas"); // create a js canvas
   gl = canvas.getContext("webgl"); // get a webgl object from it
 
   try {
@@ -99,47 +107,45 @@ function loadTriangles() {
           indexOffset += vertices.length;
       }
 
+      // Bind buffer for vertices
       vertexBuffer = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(coordArray), gl.STATIC_DRAW);
 
+      // Bind buffer for indices
       indexBuffer = gl.createBuffer();
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
       gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indexArray), gl.STATIC_DRAW);
 
+      // Track the buffer size
       triBufferSize = indexArray.length;
+
+      console.log(coordArray);
+      console.log(indexArray);
   }
 }
 
 // setup the webGL shaders
 function setupShaders() {
     // Text for vertex shader code
-    // var vertexShaderCode = 
-    // [
-    //     'attribute vec3 vertexPosition;',
-    //     '',
-    //     'void main(void)',
-    //     '{',
-    //     '    gl_Position = vec4(vertexPosition, 1.0);',
-    //     '}'
-    // ].join('\n');
-
     var vertexShaderCode = 
     [
         'precision mediump float;',
         '',
-        'attribute vec2 vertexPosition;',
+        'attribute vec3 vertexPosition;',
         'attribute vec3 vertexColor;',
         'varying vec3 fragmentColor;',
+        'uniform mat4 mWorld;',
+        'uniform mat4 mView;',
+        'uniform mat4 mProj;',
         '',
         'void main(void)',
         '{',
         '   fragmentColor = vertexColor;',
-        '   gl_Position = vec4(vertexPosition, 0.0, 1.0);',
+        '   gl_Position = mProj * mView * mWorld * vec4(vertexPosition, 1.0);',
         '}'
     ].join('\n');
 
-    // Text for fragment shader code
     // var fragmentShaderCode = 
     // [
     //     'precision mediump float;',
@@ -150,9 +156,11 @@ function setupShaders() {
     //     '}'
     // ].join('\n');
 
+    // Text for fragment shader code
     var fragmentShaderCode = 
     [
         'precision mediump float;',
+        '',
         'varying vec3 fragmentColor;',
         '',
         'void main(void)',
@@ -206,10 +214,10 @@ function setupShaders() {
 
     // Create buffer
     var triangleVertices = 
-    [ // x, y, R, G, B
-        0.0, 0.5, 1.0, 1.0, 0.0,
-        -0.5, -0.5, 0.7, 0.0, 1.0,
-        0.5, -0.5, 0.1, 1.0, 0.6
+    [ // x, y, z,             R, G, B
+        0.0, 0.5, 0.0,        1.0, 1.0, 0.0,
+        -0.5, -0.5, 0.0,      0.7, 0.0, 1.0,
+        0.5, -0.5, 0.0,       0.1, 1.0, 0.6
     ];
 
     // Create a buffer with WebGL, uses GPU
@@ -227,10 +235,10 @@ function setupShaders() {
     var positionAttribLocation = gl.getAttribLocation(shaderProgram, 'vertexPosition');
     gl.vertexAttribPointer(
         positionAttribLocation, // Attribute Location
-        2, // Number of elements per attribute
+        3, // Number of elements per attribute
         gl.FLOAT, // Type of elements
         gl.FALSE, // Not normalized
-        5 * Float32Array.BYTES_PER_ELEMENT, // Size of an individual vertex
+        6 * Float32Array.BYTES_PER_ELEMENT, // Size of an individual vertex
         0 // Offset from the beginning of a single vertex to this attribute
     );
 
@@ -241,20 +249,68 @@ function setupShaders() {
         3, // Number of elements per attribute
         gl.FLOAT, // Type of elements
         gl.FALSE, // Not normalized
-        5 * Float32Array.BYTES_PER_ELEMENT, // Size of an individual vertex
-        2 * Float32Array.BYTES_PER_ELEMENT // Offset from the beginning of a single vertex to this attribute
+        6 * Float32Array.BYTES_PER_ELEMENT, // Size of an individual vertex
+        3 * Float32Array.BYTES_PER_ELEMENT // Offset from the beginning of a single vertex to this attribute
     );
 
     // Enables each attribute
     gl.enableVertexAttribArray(positionAttribLocation);
     gl.enableVertexAttribArray(colorAttribLocation);
 
-    // Set program to use
+    // Set Program to Use
     gl.useProgram(shaderProgram);
+
+    // Locations for GPU memory of these uniforms
+    matWorldUniformLocation = gl.getUniformLocation(shaderProgram, 'mWorld');
+    var matViewUniformLocation = gl.getUniformLocation(shaderProgram, 'mView');
+    var matProjUniformLocation = gl.getUniformLocation(shaderProgram, 'mProj');
+    
+    // Identity matrices in CPU
+    worldMatrix = new Float32Array(16);
+    var viewMatrix = new Float32Array(16);
+    var projMatrix = new Float32Array(16);
+    mat4.identity(worldMatrix);
+
+    // Initialize eye, center and up vector
+    // mat4.lookAt(viewMatrix, Eye, Center, UpVector);
+    mat4.identity(viewMatrix);
+
+    // projection matrix, degrees in radians, dynamically grab aspect ratio, near value, far value
+    // mat4.perspective(projMatrix, glMatrix.toRadian(45), canvas.width / canvas.height, 0.0, 1.0);
+    mat4.identity(projMatrix);
+
+    // Send these matrices to shader
+    gl.uniformMatrix4fv(matWorldUniformLocation, gl.FALSE, worldMatrix);
+    gl.uniformMatrix4fv(matViewUniformLocation, gl.FALSE, viewMatrix);
+    gl.uniformMatrix4fv(matProjUniformLocation, gl.FALSE, projMatrix);
 }
 
+var bgColor = 0;
+var angle = 0;
+var identityMatrix = new Float32Array(16);
+mat4.identity(identityMatrix);
 function renderTriangles() {
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    // clear frame/depth buffers
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    bgColor = (bgColor < 1) ? (bgColor + 0.001) : 0;
+    gl.clearColor(bgColor, 0, 0, 1.0);
+
+    angle = performance.now() / 1000 / 6 * 2 * Math.PI;
+    mat4.rotate(worldMatrix, identityMatrix, angle, [0, 1, 0]);
+    gl.uniformMatrix4fv(matWorldUniformLocation, gl.FALSE, worldMatrix);
+
+    // Render the triangle
+    gl.drawArrays(gl.TRIANGLES,0,3);
+    
+    requestAnimationFrame(renderTriangles);
+
+    // Below is ???
+
+    // vertex buffer: activate and feed into vertex shader
+    // gl.uniform1i(altPositionUniform, altPosition); // feed
+
+    // Render the triangle
+    // gl.drawArrays(gl.TRIANGLES,0,3);
 }
 
 /* MAIN -- HERE is where execution begins after window load */
