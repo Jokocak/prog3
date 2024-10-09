@@ -1,0 +1,267 @@
+/* GLOBAL CONSTANTS AND VARIABLES */
+
+// Format for my HTTP get request calls
+// https://jokocak.github.io/prog3/triangles.json
+
+/* assignment specific globals */
+const WIN_Z = 0; // default graphics window z coord in world space
+const WIN_LEFT = 0;
+const WIN_RIGHT = 1; // default left and right x coords in world space
+const WIN_BOTTOM = 0;
+const WIN_TOP = 1; // default top and bottom y coords in world space
+const INPUT_TRIANGLES_URL =
+  "https://ncsucgclass.github.io/prog3/triangles.json"; // triangles file loc
+const INPUT_ELLIPSOIDS_URL =
+  "https://ncsucgclass.github.io/prog3/ellipsoids.json";
+//const INPUT_SPHERES_URL = "https://ncsucgclass.github.io/prog3/spheres.json"; // spheres file loc
+var Eye = new vec4.fromValues(0.5, 0.5, -0.5, 1.0); // default eye position in world space
+
+/* webgl globals */
+var gl = null; // the all powerful gl object. It's all here folks!
+var vertexBuffer; // this contains vertex coordinates in triples
+var triangleBuffer; // this contains indices into vertexBuffer in triples
+var triBufferSize; // the number of indices in the triangle buffer
+var altPosition; // flag indicating whether to alter vertex positions
+var vertexPositionAttrib; // where to put position for vertex shader
+var altPositionUniform; // where to put altPosition flag for vertex shader
+
+// ASSIGNMENT HELPER FUNCTIONS
+
+// get the JSON file from the passed URL
+function getJSONFile(url, descr) {
+  try {
+    if (typeof url !== "string" || typeof descr !== "string")
+      throw "getJSONFile: parameter not a string";
+    else {
+      var httpReq = new XMLHttpRequest(); // a new http request
+      httpReq.open("GET", url, false); // init the request
+      httpReq.send(null); // send the request
+      var startTime = Date.now();
+      while (
+        httpReq.status !== 200 &&
+        httpReq.readyState !== XMLHttpRequest.DONE
+      ) {
+        if (Date.now() - startTime > 3000) break;
+      } // until its loaded or we time out after three seconds
+      if (httpReq.status !== 200 || httpReq.readyState !== XMLHttpRequest.DONE)
+        throw "Unable to open " + descr + " file!";
+      else return JSON.parse(httpReq.response);
+    } // end if good params
+  } catch (e) {
+    // end try
+
+    console.log(e);
+    return String.null;
+  }
+} // end get input spheres
+
+// set up the webGL environment
+function setupWebGL() {
+  // Get the canvas and context
+  var canvas = document.getElementById("myWebGLCanvas"); // create a js canvas
+  gl = canvas.getContext("webgl"); // get a webgl object from it
+
+  try {
+    if (gl == null) {
+      throw "unable to create gl context -- is your browser gl ready?";
+    } else {
+      gl.clearColor(0.0, 0.0, 0.0, 1.0); // use black when we clear the frame buffer
+      gl.clearDepth(1.0); // use max when we clear the depth buffer
+      gl.enable(gl.DEPTH_TEST); // use hidden surface removal (with zbuffering)
+    }
+  } catch (e) {
+    // end try
+
+    console.log(e);
+  } // end catch
+} // end setupWebGL
+
+// read triangles in, load them into webgl buffers
+function loadTriangles() {
+  inputTriangles = getJSONFile(INPUT_TRIANGLES_URL, "triangles");
+  if (inputTriangles != null) {
+      var coordArray = [];
+      var indexArray = [];
+      var indexOffset = 0;
+
+      for (var whichSet = 0; whichSet < inputTriangles.length; whichSet++) {
+          var vertices = inputTriangles[whichSet].vertices;
+          var indices = inputTriangles[whichSet].triangles;
+
+          for (var i = 0; i < vertices.length; i++) {
+              coordArray = coordArray.concat(vertices[i]);
+          }
+
+          for (var j = 0; j < indices.length; j++) {
+              indexArray = indexArray.concat(indices[j].map(index => index + indexOffset));
+          }
+
+          indexOffset += vertices.length;
+      }
+
+      vertexBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(coordArray), gl.STATIC_DRAW);
+
+      indexBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indexArray), gl.STATIC_DRAW);
+
+      triBufferSize = indexArray.length;
+  }
+}
+
+// setup the webGL shaders
+function setupShaders() {
+    // Text for vertex shader code
+    // var vertexShaderCode = 
+    // [
+    //     'attribute vec3 vertexPosition;',
+    //     '',
+    //     'void main(void)',
+    //     '{',
+    //     '    gl_Position = vec4(vertexPosition, 1.0);',
+    //     '}'
+    // ].join('\n');
+
+    var vertexShaderCode = 
+    [
+        'precision mediump float;',
+        '',
+        'attribute vec2 vertexPosition;',
+        'attribute vec3 vertexColor;',
+        'varying vec3 fragmentColor;',
+        '',
+        'void main(void)',
+        '{',
+        '   fragmentColor = vertexColor;',
+        '   gl_Position = vec4(vertexPosition, 0.0, 1.0);',
+        '}'
+    ].join('\n');
+
+    // Text for fragment shader code
+    // var fragmentShaderCode = 
+    // [
+    //     'precision mediump float;',
+    //     'uniform vec3 diffuseColor;',
+    //     'void main(void)',
+    //     '{',
+    //     '    gl_FragColor = vec4(diffuseColor, 1.0);',
+    //     '}'
+    // ].join('\n');
+
+    var fragmentShaderCode = 
+    [
+        'precision mediump float;',
+        'varying vec3 fragmentColor;',
+        '',
+        'void main(void)',
+        '{',
+        '   gl_FragColor = vec4(fragmentColor, 1.0);',
+        '}'
+    ].join('\n');
+
+    // Create vertex shader with WebGL
+    var vertexShader = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vertexShader, vertexShaderCode);
+    gl.compileShader(vertexShader);
+
+    // Check if vertex shader compiled
+    if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+        throw "Vertex shader compilation error: " + gl.getShaderInfoLog(vertexShader);
+    }
+
+    // Create fragment shader with WebGL
+    var fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fragmentShader, fragmentShaderCode);
+    gl.compileShader(fragmentShader);
+
+    // Check if fragment shader compiled
+    if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
+        throw "Fragment shader compilation error: " + gl.getShaderInfoLog(fragmentShader);
+    }
+
+    // Create a program object with WebGL
+    var shaderProgram = gl.createProgram();
+
+    // Attach compiled vertex and fragment shaders to this shaderProgram
+    gl.attachShader(shaderProgram, vertexShader);
+    gl.attachShader(shaderProgram, fragmentShader);
+
+    // Link this shaderProgram
+    gl.linkProgram(shaderProgram);
+
+    // Check if the program was able to link properly
+    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+        throw "Shader Program linking error: " + gl.getProgramInfoLog(shaderProgram);
+    }
+
+    // Validate the program for testing, get rid of this when submitting
+    gl.validateProgram(shaderProgram);
+
+    // Check if program was valid
+    if (!gl.getProgramParameter(shaderProgram, gl.VALIDATE_STATUS)) {
+        throw "Shader Program validate error: " + gl.getProgramInfoLog(shaderProgram);
+    }
+
+    // Create buffer
+    var triangleVertices = 
+    [ // x, y, R, G, B
+        0.0, 0.5, 1.0, 1.0, 0.0,
+        -0.5, -0.5, 0.7, 0.0, 1.0,
+        0.5, -0.5, 0.1, 1.0, 0.6
+    ];
+
+    // Create a buffer with WebGL, uses GPU
+    var triangleVertexBufferObject = gl.createBuffer();
+
+    // Bind a buffer to WebGL
+    gl.bindBuffer(gl.ARRAY_BUFFER, triangleVertexBufferObject);
+
+    // No need to specify buffer because WebGL uses the last binded buffer
+    // Must use Float32Array for triangleVertices to allow this method to work
+    // gl.STATIC_DRAW sends CPU memory to GPU memory once
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(triangleVertices), gl.STATIC_DRAW);
+
+    // Grabs the location of the position attribute
+    var positionAttribLocation = gl.getAttribLocation(shaderProgram, 'vertexPosition');
+    gl.vertexAttribPointer(
+        positionAttribLocation, // Attribute Location
+        2, // Number of elements per attribute
+        gl.FLOAT, // Type of elements
+        gl.FALSE, // Not normalized
+        5 * Float32Array.BYTES_PER_ELEMENT, // Size of an individual vertex
+        0 // Offset from the beginning of a single vertex to this attribute
+    );
+
+    // Grabs the location of the color attribute
+    var colorAttribLocation = gl.getAttribLocation(shaderProgram, 'vertexColor');
+    gl.vertexAttribPointer(
+        colorAttribLocation, // Attribute Location
+        3, // Number of elements per attribute
+        gl.FLOAT, // Type of elements
+        gl.FALSE, // Not normalized
+        5 * Float32Array.BYTES_PER_ELEMENT, // Size of an individual vertex
+        2 * Float32Array.BYTES_PER_ELEMENT // Offset from the beginning of a single vertex to this attribute
+    );
+
+    // Enables each attribute
+    gl.enableVertexAttribArray(positionAttribLocation);
+    gl.enableVertexAttribArray(colorAttribLocation);
+
+    // Set program to use
+    gl.useProgram(shaderProgram);
+}
+
+function renderTriangles() {
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+/* MAIN -- HERE is where execution begins after window load */
+
+function main() {
+  setupWebGL(); // set up the webGL environment
+  loadTriangles(); // load in the triangles from tri file
+  setupShaders(); // setup the webGL shaders
+  renderTriangles(); // draw the triangles using webGL
+} // end main
