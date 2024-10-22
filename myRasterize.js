@@ -72,6 +72,7 @@ const HighlightShift = {
 }
 
 var inputTriangles;
+let highlightedTriangleModelMatrix = mat4.create();
 
 // ASSIGNMENT HELPER FUNCTIONS
 
@@ -413,8 +414,10 @@ function renderTriangles() {
   
   // Render each set of triangles
   for (var whichTriSet=0; whichTriSet<numTriangleSets; whichTriSet++) {
-    // Define modeling matrix
-    inputTriangles[whichTriSet].mMatrix = mat4.create();
+    // Define modeling matrix if not defined
+    if (inputTriangles[whichTriSet].mMatrix == null) {
+      inputTriangles[whichTriSet].mMatrix = mat4.create();
+    }
 
     // Logic to render highlighted triangle
     if (whichTriSet == highlightedTriangle) {
@@ -424,7 +427,7 @@ function renderTriangles() {
 
       // Create scaled model matrix
       const scaledModelMatrix = mat4.create();
-      mat4.multiply(scaledModelMatrix, scalingMatrix, inputTriangles[whichTriSet].mMatrix);
+      mat4.multiply(scaledModelMatrix, scalingMatrix, highlightedTriangleModelMatrix);
 
       // Pass scaled modeling matrix for set to shader
       gl.uniformMatrix4fv(modelMatrixULoc, false, scaledModelMatrix);
@@ -469,32 +472,6 @@ function renderTriangles() {
   requestAnimationFrame(renderTriangles);
 }
 
-// // This function renders the triangles
-// function renderTriangles() {
-//   // Clear frame/depth buffers
-//   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-//   // Update the view matrix based on user input
-//   updateViewMatrix();
-
-//   // Vertex buffer: activate and feed into vertex shader
-//   gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer); // activate
-//   gl.vertexAttribPointer(vertexPositionAttrib, 3, gl.FLOAT, false, 0, 0);
-
-//   // Triangle index buffer: activate and feed into shader program
-//   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleBuffer);
-
-//   // Color buffer: activate and feed into shader program
-//   gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-//   gl.vertexAttribPointer(vertexColorAttrib, 3, gl.FLOAT, false, 0, 0);
-
-//   // Render the image
-//   gl.drawElements(gl.TRIANGLES, triBufferSize, gl.UNSIGNED_SHORT, 0);
-
-//   // Loop this function
-//   requestAnimationFrame(renderTriangles);
-// }
-
 // Rotates the view matrix
 function rotateView(angle, axis) {
   // Create rotation matrix
@@ -531,6 +508,12 @@ function updateViewMatrix() {
 function handleKeyPress(event) {
   const translationStep = 0.03;
   const rotationStep = Math.PI / 180 * 1; // 3 degrees in radians
+
+  // Use the existing model matrix as a base
+  if (highlightedTriangle != -1) {
+    gl.uniformMatrix4fv(modelMatrixULoc, false, inputTriangles[highlightedTriangle].mMatrix);
+    mat4.copy(highlightedTriangleModelMatrix, inputTriangles[highlightedTriangle].mMatrix);
+  }
 
   switch (event.key) {
     // Translation for eye, lookAt, and lookUp vectors
@@ -586,20 +569,27 @@ function handleKeyPress(event) {
 
     // Translation for highlighted triangle
     case 'k':
+      mat4.translate(highlightedTriangleModelMatrix, highlightedTriangleModelMatrix, [-translationStep, 0, 0]);
       break;
     case ';':
+      mat4.translate(highlightedTriangleModelMatrix, highlightedTriangleModelMatrix, [translationStep, 0, 0]);
       break;
     case 'o':
+      mat4.translate(highlightedTriangleModelMatrix, highlightedTriangleModelMatrix, [0, 0, translationStep]);
       break;
     case 'l':
+      mat4.translate(highlightedTriangleModelMatrix, highlightedTriangleModelMatrix, [0, 0, -translationStep]);
       break;
     case 'i':
+      mat4.translate(highlightedTriangleModelMatrix, highlightedTriangleModelMatrix, [0, translationStep, 0]);
       break;
     case 'p':
+      mat4.translate(highlightedTriangleModelMatrix, highlightedTriangleModelMatrix, [0, -translationStep, 0]);
       break;
 
     // Rotation for highlighted triangle
     case 'K':
+      mat4.rotateY(highlightedTriangleModelMatrix, highlightedTriangleModelMatrix, rotationStep);
       break;
     case ':':
       break;
