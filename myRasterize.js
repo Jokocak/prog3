@@ -11,6 +11,8 @@ const WIN_BOTTOM = 0;
 const WIN_TOP = 1; // default top and bottom y coords in world space
 const INPUT_TRIANGLES_URL =
   "https://ncsucgclass.github.io/prog3/triangles.json"; // triangles file loc
+  const INPUT_TRIANGLES_TWO_URL =
+  "https://ncsucgclass.github.io/prog3/triangles2.json";
 const INPUT_ELLIPSOIDS_URL =
   "https://ncsucgclass.github.io/prog3/ellipsoids.json";
 //const INPUT_SPHERES_URL = "https://ncsucgclass.github.io/prog3/spheres.json"; // spheres file loc
@@ -37,6 +39,10 @@ var coordArray;
 var indexArray;
 var colorArray;
 var colorBuffer;
+
+var shaderProgram;
+var viewMatrix;
+var projectionMatrix;
 
 // ASSIGNMENT HELPER FUNCTIONS
 
@@ -203,11 +209,13 @@ function setupShaders() {
   [
     'attribute vec3 vertexPosition;',
     'attribute vec3 vertexColor;',
+    'uniform mat4 uViewMatrix;',
+    'uniform mat4 uProjectionMatrix;',
     'varying vec3 fragColor;',
     '',
     'void main(void)',
     '{',
-    ' gl_Position = vec4(vertexPosition, 1.0);',
+    ' gl_Position = uProjectionMatrix * uViewMatrix * vec4(vertexPosition, 1.0);',
     'fragColor = vertexColor;',
     '}'
   ].join('\n');
@@ -238,7 +246,8 @@ function setupShaders() {
   }
 
   // Create a program object with WebGL
-  var shaderProgram = gl.createProgram();
+  shaderProgram = gl.createProgram();
+  // var shaderProgram = gl.createProgram();
 
   // Attach compiled vertex and fragment shaders to this shaderProgram
   gl.attachShader(shaderProgram, vertexShader);
@@ -254,16 +263,6 @@ function setupShaders() {
     );
   }
 
-  // Validate the program for testing, get rid of this when submitting ****************
-  gl.validateProgram(shaderProgram);
-
-  // Check if program was valid
-  if (!gl.getProgramParameter(shaderProgram, gl.VALIDATE_STATUS)) {
-    throw (
-      "Shader Program validate error: " + gl.getProgramInfoLog(shaderProgram)
-    );
-  }
-
   // Set Program to Use
   gl.useProgram(shaderProgram);
 
@@ -275,7 +274,19 @@ function setupShaders() {
   vertexColorAttrib = gl.getAttribLocation(shaderProgram, "vertexColor");
   gl.enableVertexAttribArray(vertexColorAttrib);
 
+  // Create identity matrices for view and projection
+  viewMatrix = mat4.create();
+  projectionMatrix = mat4.create();
 
+  // mat4.perspective(projectionMatrix, 
+  //   glMatrix.toRadian(45),    // Field of view (45 degrees)
+  //   canvas.width / canvas.height, // Aspect ratio
+  //   0.1,                      // Near clipping plane
+  //   1000.0);                  // Far clipping plane
+
+  // Set these matrices to identity matrix
+  gl.uniformMatrix4fv(gl.getUniformLocation(shaderProgram, "uViewMatrix"), false, viewMatrix);
+  gl.uniformMatrix4fv(gl.getUniformLocation(shaderProgram, "uProjectionMatrix"), false, projectionMatrix);
 }
 
 var bgColor = 0;
@@ -283,9 +294,12 @@ function renderTriangles() {
   // Clear frame/depth buffers
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  // Calculate color of background, goes repeatedly from red to black
-  bgColor = bgColor < 1 ? bgColor + 0.001 : 0;
-  gl.clearColor(bgColor, 0, 0, 1.0);
+  // // Calculate color of background, goes repeatedly from red to black
+  // bgColor = bgColor < 1 ? bgColor + 0.001 : 0;
+  // gl.clearColor(bgColor, 0, 0, 1.0);
+
+  // Update the view matrix based on user input
+  updateViewMatrix();
 
   // Vertex buffer: activate and feed into vertex shader
   gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer); // activate
@@ -305,16 +319,102 @@ function renderTriangles() {
   requestAnimationFrame(renderTriangles);
 }
 
+// Rotates the view matrix
+function rotateView(angle, axis) {
+  const rotationMatrix = mat4.create();
+  mat4.rotate(rotationMatrix, mat4.create(), angle, axis);
+
+  // Update the LookVector by multiplying it with the rotation matrix
+  vec4.transformMat4(LookVector, LookVector, rotationMatrix);
+
+  // Update the Center position by adjusting the LookVector
+  Center[0] = Eye[0] + LookVector[0];
+  Center[1] = Eye[1] + LookVector[1];
+  Center[2] = Eye[2] + LookVector[2];
+}
+
+// This function updates the view matrix
+function updateViewMatrix() {
+  //const viewMatrix = mat4.create();
+  mat4.lookAt(viewMatrix, Eye, Center, UpVector);
+
+  // Set the view matrix uniform in your shaders
+  gl.uniformMatrix4fv(gl.getUniformLocation(shaderProgram, "uViewMatrix"), false, viewMatrix);
+}
+
+// Apply transformations with key presses
+function handleKeyPress(event) {
+  const translationStep = 0.05;
+  const rotationStep = Math.PI / 180 * 5; // 5 degrees in radians
+
+  switch (event.key) {
+    case 'a': // Translate view left along X
+      Eye[0] -= translationStep;
+      Center[0] -= translationStep;
+      break;
+    case 'd': // Translate view right along X
+      Eye[0] += translationStep;
+      Center[0] += translationStep;
+      break;
+    case 'w': // Translate view forward along Z
+      Eye[2] += translationStep;
+      Center[2] += translationStep;
+      break;
+    case 's': // Translate view backward along Z
+      Eye[2] -= translationStep;
+      Center[2] -= translationStep;
+      break;
+    case 'q': // Translate view up along Y
+      Eye[1] += translationStep;
+      Center[1] += translationStep;
+      break;
+    case 'e': // Translate view down along Y
+      Eye[1] -= translationStep;
+      Center[1] -= translationStep;
+      break;
+
+    case 'A': // Rotate view left (yaw) around Y axis
+      rotateView(rotationStep, [0, 1, 0]);
+      break;
+    case 'D': // Rotate view right (yaw) around Y axis
+      rotateView(-rotationStep, [0, 1, 0]);
+      break;
+    case 'W': // Rotate view forward (pitch) around X axis
+      rotateView(rotationStep, [1, 0, 0]);
+      break;
+    case 'S': // Rotate view backward (pitch) around X axis
+      rotateView(-rotationStep, [1, 0, 0]);
+      break;
+  }
+}
+
+// function setupProjectionMatrix() {
+//   // Create a perspective projection matrix
+//   mat4.perspective(projectionMatrix, 
+//                    glMatrix.toRadian(45),    // Field of view (45 degrees)
+//                    canvas.width / canvas.height, // Aspect ratio
+//                    0.1,                      // Near clipping plane
+//                    1000.0);                  // Far clipping plane
+// }
+
+
 /* MAIN -- HERE is where execution begins after window load */
 function main() {
   // Set up the WebGL environment
   setupWebGL();
 
   // Load in the triangles from tri file
-  loadTriangles(INPUT_TRIANGLES_URL);
+  // loadTriangles(INPUT_TRIANGLES_URL);
+  loadTriangles(INPUT_TRIANGLES_TWO_URL);
 
   // Setup the webGL shaders
   setupShaders();
+
+  // Add keyboard event listener
+  window.addEventListener("keydown", handleKeyPress);
+
+  // Setup projection matrix
+  //setupProjectionMatrix();
 
   // Draw the triangles using WebGL
   renderTriangles();
