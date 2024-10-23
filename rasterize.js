@@ -16,6 +16,7 @@ const INPUT_TRIANGLES_URL =
 const INPUT_ELLIPSOIDS_URL =
   "https://ncsucgclass.github.io/prog3/ellipsoids.json";
 //const INPUT_SPHERES_URL = "https://ncsucgclass.github.io/prog3/spheres.json"; // spheres file loc
+const INTERESTING_URL = "https://jokocak.github.io/prog3/interesting.json";
 var Eye = new vec4.fromValues(0.5, 0.5, -0.5, 1.0); // default eye position in world space
 var Center = new vec4.fromValues(0.5, 0.5, 0.0, 1.0);
 var UpVector = new vec4.fromValues(0.0, 1.0, 0.0, 1.0);
@@ -74,6 +75,8 @@ const HighlightShift = {
 
 var inputTriangles;
 let highlightedTriangleModelMatrix = mat4.create();
+
+var currentURL = INPUT_TRIANGLES_TWO_URL; // Start with the default URL
 
 // ASSIGNMENT HELPER FUNCTIONS
 
@@ -487,6 +490,16 @@ function handleKeyPress(event) {
     case 'P':
       rotateTriangleZ(-rotationStep);
       break;
+
+    // Load interesting image
+    case '!': // Exclamation point key to switch URLs
+      if (currentURL === INPUT_TRIANGLES_TWO_URL) {
+        currentURL = INTERESTING_URL;
+      } else {
+        currentURL = INPUT_TRIANGLES_TWO_URL;
+      }
+      loadTriangles(currentURL); // Reload triangles from the new URL
+    break;
   }
 }
 
@@ -630,7 +643,7 @@ function main() {
   setupWebGL();
 
   // Load in the triangles from tri file
-  loadTriangles(INPUT_TRIANGLES_TWO_URL);
+  loadTriangles(currentURL);
 
   // Setup the webGL shaders
   setupShaders();
